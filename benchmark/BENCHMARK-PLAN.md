@@ -22,3 +22,5 @@ Script: `benchmark/benchmark.py`
 
 This local run is only a reference point to confirm the script works correctly.
 The real comparison happens on actual AWS instances (Day 22: x86, Day 23: ARM).
+
+--------------------------------------------------------------
