@@ -20,7 +20,13 @@
 5. **Kingfisher (IEEE INFOCOM 2011)** — Older paper, picks server configs to save cost and cut
    reconfiguration time. Same gap — cost only, one signal, not three.
 
-## What's missing across all five
+6. **AWS FinOps Agent (launched June 2026)** — AWS's own official agent, built on Bedrock. Looks
+   at cost data, investigates anomalies, and suggests fixes, then posts them to Slack or Jira.
+   Built human-in-the-loop on purpose — it reports and recommends, doesn't act on its own. Even
+   AWS's newest tool stops at "tell someone" instead of "stop it before it happens" — which backs
+   up the same gap this project is trying to fill.
+
+## What's missing across all six
 Every paper does one thing: track cost, suggest cost savings, or provision based on cost alone.
 None of them check cost + failure risk + architecture fit together, and none of them act
 *before* a deployment happens — they all react after the fact. That's the open space this
