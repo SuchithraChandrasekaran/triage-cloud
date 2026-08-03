@@ -30,3 +30,15 @@ Script: `benchmark/benchmark.py`
 For this specific CPU-bound workload, x86 (t3.micro) was slightly faster than
 ARM (t4g.micro) - 5.51s vs 5.86s. This goes against the common assumption
 that ARM/Graviton is always faster or more efficient.
+
+## Findings (Day 24)
+I ran the same script on both instance types. x86 finished in 5.51 seconds,
+ARM finished in 5.86 seconds. So x86 was a bit faster this time, which
+surprised me - I expected ARM to win since that's what most people say.
+
+But that's not true. ARM instances usually cost less per hour than
+x86 ones, so even though ARM took a little longer, it might still end up
+cheaper overall. I haven't done that cost math yet.
+
+Key takeaway: don't just pick ARM because everyone says it's
+better. It depends on what the job actually needs - speed or lower cost.
