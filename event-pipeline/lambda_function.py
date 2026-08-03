@@ -42,7 +42,10 @@ def check_failure_pattern(message_text):
     for row in rows:
         failure_type = row.get("failure_type", "")
         resource_affected = row.get("resource_affected", "")
-        if failure_type.lower() in message_lower or resource_affected.lower() in message_lower:
+        cause = row.get("cause", "")
+        if (failure_type.lower() in message_lower
+                or resource_affected.lower() in message_lower
+                or cause.lower() in message_lower):
             return failure_type
 
     return None
