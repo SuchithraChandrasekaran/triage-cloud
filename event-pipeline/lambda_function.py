@@ -1,9 +1,9 @@
 """
 triage-cloud-decision-engine
 
-Day 18 update: added a failure-pattern check. Scans the
-triage-cloud-failure-modes table and checks if the incoming message
-mentions any known failure type or affected resource.
+Day 26 update: added an architecture-fit check and a combined
+make_decision() function that pulls together budget, failure risk, and
+architecture fit into one final answer.
 """
 
 import json
@@ -25,12 +25,26 @@ def decimal_default(obj):
     raise TypeError
 
 
+def check_budget(project_name):
+    try:
+        response = budget_table.get_item(Key={"project_name": project_name})
+        item = response.get("Item")
+        if not item:
+            return {"status": "unknown", "current_spend": None, "budget_limit": None}
+        current_spend = float(item.get("current_spend", 0))
+        budget_limit = float(item.get("budget_limit", 0))
+        over_budget = current_spend > budget_limit
+        return {
+            "status": "over" if over_budget else "ok",
+            "current_spend": current_spend,
+            "budget_limit": budget_limit
+        }
+    except Exception as e:
+        logger.error("Error reading budget table: %s", str(e))
+        return {"status": "error", "current_spend": None, "budget_limit": None}
+
+
 def check_failure_pattern(message_text):
-    """
-    Very simple keyword match for now: checks if any known failure_type
-    or resource_affected text appears in the incoming message.
-    Good enough to prove the check works - can be made smarter later.
-    """
     try:
         response = failure_table.scan()
         rows = response.get("Items", [])
@@ -47,8 +61,26 @@ def check_failure_pattern(message_text):
                 or resource_affected.lower() in message_lower
                 or cause.lower() in message_lower):
             return failure_type
-
     return None
+
+
+def check_architecture_fit(message_text):
+    """
+    Simple rule from Day 25: default to ARM (cheaper), unless the message
+    signals speed/urgency matters more, then suggest x86.
+    """
+    message_lower = message_text.lower()
+    if "fast" in message_lower or "urgent" in message_lower or "priority" in message_lower:
+        return "x86 (t3.micro) - speed prioritized"
+    return "ARM (t4g.micro) - cost prioritized, default"
+
+
+def make_decision(budget_result, failure_match, architecture_suggestion):
+    if budget_result["status"] == "over":
+        return "BLOCK - project is over budget"
+    if failure_match:
+        return f"BLOCK - matches known failure pattern: {failure_match}"
+    return f"APPROVE - suggested instance: {architecture_suggestion}"
 
 
 def lambda_handler(event, context):
@@ -59,32 +91,19 @@ def lambda_handler(event, context):
         sns_message = record.get("Sns", {}).get("Message", "")
         logger.info("SNS message content: %s", sns_message)
 
-    # Read the triage-cloud project's budget row
-    item = None
-    try:
-        response = budget_table.get_item(Key={"project_name": "triage-cloud"})
-        item = response.get("Item")
-        if item:
-            logger.info("Budget row found: %s", json.dumps(item, default=decimal_default))
-        else:
-            logger.info("No budget row found for project_name=triage-cloud")
-    except Exception as e:
-        logger.error("Error reading DynamoDB table: %s", str(e))
+    budget_result = check_budget("triage-cloud")
+    logger.info("BUDGET CHECK: %s", json.dumps(budget_result, default=decimal_default))
 
-    # Check the message against known failure patterns
-    matched_failure = check_failure_pattern(sns_message)
-    if matched_failure:
-        logger.info("FAILURE CHECK: matched %s", matched_failure)
-    else:
-        logger.info("FAILURE CHECK: no match found")
+    failure_match = check_failure_pattern(sns_message)
+    logger.info("FAILURE CHECK: %s", failure_match if failure_match else "no match found")
 
-    logger.info(
-        "DECISION: no rule applied yet - budget=%s, failure_check=%s, architecture_check=pending",
-        item.get("current_spend") if item else "unknown",
-        matched_failure if matched_failure else "clear"
-    )
+    architecture_suggestion = check_architecture_fit(sns_message)
+    logger.info("ARCHITECTURE CHECK: %s", architecture_suggestion)
+
+    final_decision = make_decision(budget_result, failure_match, architecture_suggestion)
+    logger.info("DECISION: %s", final_decision)
 
     return {
         "statusCode": 200,
-        "body": json.dumps("Event received, logged, DynamoDB checked, failure pattern checked")
+        "body": json.dumps({"decision": final_decision})
     }
