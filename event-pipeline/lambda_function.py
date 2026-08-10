@@ -166,9 +166,6 @@ def check_architecture_fit(message_text):
     if ("fast" in message_lower or "urgent" in message_lower or "priority" in message_lower
             or "quickly" in message_lower or "time-sensitive" in message_lower
             or "asap" in message_lower or "immediately" in message_lower):
-            if ("fast" in message_lower or "urgent" in message_lower or "priority" in message_lower
-        or "quickly" in message_lower or "time-sensitive" in message_lower
-        or "asap" in message_lower or "immediately" in message_lower):
         return "x86 (t3.micro) - speed prioritized"
     return "ARM (t4g.micro) - cost prioritized, default"
 
