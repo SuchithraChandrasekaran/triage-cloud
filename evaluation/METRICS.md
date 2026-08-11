@@ -154,3 +154,25 @@ three-quarters of cases - a large enough range that no strong claim about
 the semantic layer's real-world reliability should be drawn from this
 sample alone. Larger-scale evaluation is needed before this system's
 false-positive rate could be stated with statistical confidence.
+
+## Cost-Per-Invocation Analysis
+
+Computed from real billed-duration values recorded in CloudWatch logs
+during testing (AWS Lambda pricing, us-east-1, 128 MB memory, on-demand,
+$0.0000166667 per GB-second + $0.0000002 per request).
+
+| Configuration | Avg billed duration | Cost per invocation |
+|---|---|---|
+| Keyword-only checks (no AI call) | 886 ms | $0.000002045 |
+| With Groq AI semantic check | 1,522 ms | $0.000003372 |
+
+The AI layer roughly adds 60% more compute time per invocation, driven by
+the external API round-trip. At this duration, AWS's free tier (1M
+requests + 400,000 GB-seconds/month) covers approximately 1,000,000
+invocations per month at zero cost - well beyond what a project at this
+scale would use. Extrapolated to a paid tier for reference: 100,000
+invocations/month would cost approximately $0.34; 1,000,000 would cost
+approximately $3.37 - the three-way decision gate (skipping the AI call
+entirely when a keyword match already found a result) is therefore also
+a meaningful cost-efficiency choice at higher volumes, not just a latency
+optimization.
