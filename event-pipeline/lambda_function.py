@@ -7,6 +7,8 @@ layer, and three-outcome decision (APPROVE / FLAG / BLOCK).
 
 This is the authoritative version - paste this into BOTH the AWS Lambda
 console AND the local repo file, so both start identical.
+Adds an AI-based (Gemini) semantic failure-pattern check alongside the
+existing keyword-based check, so both can be compared honestly.
 """
 
 import json
@@ -110,6 +112,15 @@ def check_failure_pattern_ai(message_text, rows):
     if not GROQ_API_KEY:
         logger.info("AI CHECK: skipped - no GROQ_API_KEY set")
         return None, 0
+    New: semantic check using Groq (Llama model, OpenAI-compatible API).
+    Sends the message plus the list of known failure types to Groq, asks
+    it to pick the best match or 'none'. Returns None if the API key isn't
+    set or the call fails - this check is additive, never blocks the
+    pipeline on its own failure.
+    """
+    if not GROQ_API_KEY:
+        logger.info("AI CHECK: skipped - no GROQ_API_KEY set")
+        return None
 
     failure_list_text = "\n".join(
         f"- {row.get('failure_type', '')}: {row.get('cause', '')}" for row in rows
@@ -130,6 +141,10 @@ def check_failure_pattern_ai(message_text, rows):
         "Reply in exactly this format, two lines:\n"
         "MATCH: <exact failure_type name, or NONE>\n"
         "CONFIDENCE: <a number from 0 to 100, how sure you are>"
+        "Reply with ONLY the exact failure_type name if the message "
+        "describes an active match to one of the listed patterns (even if "
+        "worded differently), or reply with exactly the word NONE if it "
+        "doesn't, or if the issue is resolved/negated. No other text."
     )
 
     payload = {
@@ -173,6 +188,15 @@ def check_failure_pattern_ai(message_text, rows):
     except Exception as e:
         logger.error("Error parsing Groq response: %s", str(e))
         return None, 0
+            if text.upper() == "NONE":
+                return None
+            return text
+    except urllib.error.URLError as e:
+        logger.error("Groq API error: %s", str(e))
+        return None
+    except Exception as e:
+        logger.error("Error parsing Groq response: %s", str(e))
+        return None
 
 
 def check_architecture_fit(message_text):
@@ -191,6 +215,10 @@ def investigate_unmatched_case(message_text, rows):
     this looks like a genuinely new, unknown failure pattern worth
     flagging for human review - and if so, takes the action of writing
     it to a review queue table itself, with its own reasoning.
+    flagging - and if so, takes the action of writing it to a review
+    queue table itself, with its own reasoning. This is a decision +
+    action taken by the AI, not a fixed classification returned to a
+    human-coded branch.
     """
     if not GROQ_API_KEY:
         return None
@@ -238,6 +266,7 @@ def investigate_unmatched_case(message_text, rows):
 
         if "FLAG" in decision_line.upper():
             reason = reason_line.replace("REASON:", "").strip()
+            # The agent takes its own action here: writing to the review queue
             try:
                 review_table.put_item(Item={
                     "message_id": context_request_id_holder["value"],
@@ -262,6 +291,7 @@ def investigate_unmatched_case(message_text, rows):
 def make_decision(budget_result, failure_match_keyword, failure_match_ai, agent_flag, architecture_suggestion):
     if budget_result["status"] == "over":
         return "BLOCK - project is over budget"
+    # Either check catching a match is enough to block
     final_match = failure_match_keyword or failure_match_ai
     if final_match:
         return f"BLOCK - matches known failure pattern: {final_match}"
@@ -290,6 +320,8 @@ def lambda_handler(event, context):
     failure_match_ai, ai_confidence = check_failure_pattern_ai(sns_message, failure_rows)
     logger.info("FAILURE CHECK (AI): %s (confidence: %d)",
                 failure_match_ai if failure_match_ai else "no match found", ai_confidence)
+    failure_match_ai = check_failure_pattern_ai(sns_message, failure_rows)
+    logger.info("FAILURE CHECK (AI): %s", failure_match_ai if failure_match_ai else "no match found")
 
     agent_flag = None
     if not failure_match_keyword and not failure_match_ai:
