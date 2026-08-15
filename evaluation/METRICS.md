@@ -176,3 +176,49 @@ approximately $3.37 - the three-way decision gate (skipping the AI call
 entirely when a keyword match already found a result) is therefore also
 a meaningful cost-efficiency choice at higher volumes, not just a latency
 optimization.
+
+## Large-Scale Evaluation (100 real test cases)
+
+Run via an automated batch-testing tool (tools/batch_test.py) that invokes
+the real deployed Lambda directly for 100 systematically generated
+messages: 48 failure-mode variants (across direct, paraphrase x2,
+negated x2, and unrelated phrasing, for 8 confirmed-loaded failure
+types), 10 budget boundary cases, 18 architecture-urgency cases, and 24
+clean/unrelated messages.
+
+| Category | Correct | Total | Accuracy | 95% Wilson CI |
+|---|---|---|---|---|
+| Overall | 90 | 100 | 90.0% | [82.6%, 94.5%] |
+| Failure matching | 38 | 48 | 79.2% | [65.7%, 88.3%] |
+| Budget | 10 | 10 | 100.0% | [72.2%, 100.0%] |
+| Architecture | 18 | 18 | 100.0% | [82.4%, 100.0%] |
+| Clean/unrelated | 24 | 24 | 100.0% | [86.2%, 100.0%] |
+
+At this larger, more realistic sample size, budget, architecture, and
+clean-message handling all remain fully reliable, while failure-pattern
+matching drops to 79.2% - a materially different picture than the small
+initial samples suggested, and a more honest one. This is the correct,
+expected effect of testing at scale: smaller samples can mask real
+failure rates that only become visible with more data.
+
+**2 false positives** (both "negated" variants: a resolved IAM issue and
+a "no throttling detected" message still matched and blocked) - the
+negation guard added earlier reduces but does not eliminate this failure
+mode at scale.
+
+**8 false negatives**, concentrated almost entirely in "paraphrase2"
+variants - messages describing a real failure using vocabulary not
+present in the knowledge base's stored phrasing (e.g., "NACL rules
+appear misconfigured" was not recognized as Security group
+misconfiguration; "Automation script hitting AWS API rate limits" was
+not recognized as API throttling). Notably, several of these
+false-negative cases were still caught by the agentic layer, which
+independently flagged them for human review rather than silently
+approving - a real safety benefit of the three-outcome design even where
+the primary matching failed.
+
+**Limitation of this run:** the AI confidence score and per-check match
+fields were not captured in this dataset due to a deployment gap - the
+enriched Lambda response (added to support ROC/AUC analysis) had not yet
+been deployed when this batch was run. A follow-up run is needed to
+capture confidence data for a full ROC/AUC curve.
