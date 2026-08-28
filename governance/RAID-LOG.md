@@ -36,7 +36,7 @@
 | 1 | AWS Free Tier account limits | Active, monitored via Zero Spend budget |
 | 2 | Groq free-tier API availability | Active |
 | 3 | IEEE TCC submission portal (ScholarOne) | Account created |
-| 4 | Governance/policy framing content |  In progress |
-| 5 | AHP consistency-ratio calculation | Pending pairwise inputs |
-| 6 | Confidence-interval calculation (Wilson score) | Pending final test counts |
-| 7 | Governance/PM artifacts (RAID log, success criteria) | In progress |
+| 4 | Governance/policy framing content | Done |
+| 5 | AHP consistency-ratio calculation | Done — CR = 0.075 |
+| 6 | Confidence-interval calculation (Wilson score) | Done |
+| 7 | Governance/PM artifacts (RAID log, success criteria) | Done |
