@@ -32,10 +32,7 @@ context_request_id_holder = {"value": "unknown"}
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-if GROQ_API_KEY:
-    logger.info("GROQ_API_KEY loaded - length: %d, starts: %s, ends: %s",
-                len(GROQ_API_KEY), GROQ_API_KEY[:6], GROQ_API_KEY[-4:])
-else:
+if not GROQ_API_KEY:
     logger.info("GROQ_API_KEY is not set")
 
 
