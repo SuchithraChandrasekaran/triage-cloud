@@ -7,8 +7,6 @@ layer, and three-outcome decision (APPROVE / FLAG / BLOCK).
 
 This is the authoritative version - paste this into BOTH the AWS Lambda
 console AND the local repo file, so both start identical.
-Adds an AI-based (Gemini) semantic failure-pattern check alongside the
-existing keyword-based check, so both can be compared honestly.
 """
 
 import json
@@ -34,8 +32,7 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 if not GROQ_API_KEY:
     logger.info("GROQ_API_KEY is not set")
-
-
+    
 def decimal_default(obj):
     if isinstance(obj, Decimal):
         return float(obj)
@@ -82,7 +79,11 @@ def check_failure_pattern_keyword(message_text, rows):
     resolved_or_negation_signals = [
         "resolved", "fixed", "no issue", "no issues", "not found",
         "issues found", "successfully", "completed", "no longer",
-        "was fixed", "has been fixed", "review completed"
+        "was fixed", "has been fixed", "review completed",
+        "no sign of", "ruled out", "not present", "healthy status",
+        "false alarm", "fully remediated", "confirmed is not",
+        "well within", "not an issue", "all clear", "operating normally",
+        "closed as resolved", "remediated"
     ]
     if any(signal in message_lower for signal in resolved_or_negation_signals):
         return None
@@ -109,15 +110,6 @@ def check_failure_pattern_ai(message_text, rows):
     if not GROQ_API_KEY:
         logger.info("AI CHECK: skipped - no GROQ_API_KEY set")
         return None, 0
-    New: semantic check using Groq (Llama model, OpenAI-compatible API).
-    Sends the message plus the list of known failure types to Groq, asks
-    it to pick the best match or 'none'. Returns None if the API key isn't
-    set or the call fails - this check is additive, never blocks the
-    pipeline on its own failure.
-    """
-    if not GROQ_API_KEY:
-        logger.info("AI CHECK: skipped - no GROQ_API_KEY set")
-        return None
 
     failure_list_text = "\n".join(
         f"- {row.get('failure_type', '')}: {row.get('cause', '')}" for row in rows
@@ -128,20 +120,27 @@ def check_failure_pattern_ai(message_text, rows):
         "CURRENT problem matching a known failure pattern. Here is the "
         "list of known failure types and their causes:\n\n"
         f"{failure_list_text}\n\n"
-        f"Message: \"{message_text}\"\n\n"
         "Important: if the message describes an issue that was already "
-        "resolved, fixed, or explicitly states no such issue was found "
-        "(e.g. past tense, 'no issues', 'successfully resolved', 'review "
-        "completed with no problems'), that does NOT count as a match, "
-        "even if it mentions the same words - only an active, current "
-        "problem counts.\n\n"
+        "resolved, fixed, ruled out, or explicitly states no such issue "
+        "was found - regardless of exact wording (e.g. 'no sign of X', "
+        "'X ruled out', 'X was a false alarm', 'confirmed X is not "
+        "present', 'X monitoring shows healthy status') - that does NOT "
+        "count as a match, even if it names the failure type directly. "
+        "Only an active, current problem counts.\n\n"
+        "Examples:\n"
+        "Message: \"Alert triggered: IAM misconfiguration\"\n"
+        "MATCH: IAM misconfiguration\nCONFIDENCE: 90\n\n"
+        "Message: \"No sign of IAM misconfiguration, all clear\"\n"
+        "MATCH: NONE\nCONFIDENCE: 90\n\n"
+        "Message: \"On-call engineer confirmed disk space exhaustion\"\n"
+        "MATCH: Disk space exhaustion\nCONFIDENCE: 85\n\n"
+        "Message: \"Historical API throttling from last quarter, fully "
+        "remediated\"\nMATCH: NONE\nCONFIDENCE: 85\n\n"
+        f"Now classify this message:\n"
+        f"Message: \"{message_text}\"\n\n"
         "Reply in exactly this format, two lines:\n"
         "MATCH: <exact failure_type name, or NONE>\n"
         "CONFIDENCE: <a number from 0 to 100, how sure you are>"
-        "Reply with ONLY the exact failure_type name if the message "
-        "describes an active match to one of the listed patterns (even if "
-        "worded differently), or reply with exactly the word NONE if it "
-        "doesn't, or if the issue is resolved/negated. No other text."
     )
 
     payload = {
@@ -176,7 +175,17 @@ def check_failure_pattern_ai(message_text, rows):
 
             logger.info("AI CHECK raw - match: %s, confidence: %d", match_value, confidence_value)
 
+            # Validate: only accept a match if it's actually one of the
+            # known failure types, not arbitrary text the model returned
+            # (fixes a real bug found during chaos testing: an empty
+            # message caused Groq to reply conversationally instead of
+            # following the expected format, and that reply was
+            # incorrectly treated as a valid failure match)
+            known_failure_types = [row.get("failure_type", "") for row in rows]
             if match_value.upper() == "NONE" or not match_value:
+                return None, confidence_value
+            if match_value not in known_failure_types:
+                logger.info("AI CHECK: returned value '%s' is not a known failure type - discarding", match_value)
                 return None, confidence_value
             return match_value, confidence_value
     except urllib.error.URLError as e:
@@ -185,15 +194,6 @@ def check_failure_pattern_ai(message_text, rows):
     except Exception as e:
         logger.error("Error parsing Groq response: %s", str(e))
         return None, 0
-            if text.upper() == "NONE":
-                return None
-            return text
-    except urllib.error.URLError as e:
-        logger.error("Groq API error: %s", str(e))
-        return None
-    except Exception as e:
-        logger.error("Error parsing Groq response: %s", str(e))
-        return None
 
 
 def check_architecture_fit(message_text):
@@ -212,10 +212,6 @@ def investigate_unmatched_case(message_text, rows):
     this looks like a genuinely new, unknown failure pattern worth
     flagging for human review - and if so, takes the action of writing
     it to a review queue table itself, with its own reasoning.
-    flagging - and if so, takes the action of writing it to a review
-    queue table itself, with its own reasoning. This is a decision +
-    action taken by the AI, not a fixed classification returned to a
-    human-coded branch.
     """
     if not GROQ_API_KEY:
         return None
@@ -263,7 +259,6 @@ def investigate_unmatched_case(message_text, rows):
 
         if "FLAG" in decision_line.upper():
             reason = reason_line.replace("REASON:", "").strip()
-            # The agent takes its own action here: writing to the review queue
             try:
                 review_table.put_item(Item={
                     "message_id": context_request_id_holder["value"],
@@ -288,7 +283,6 @@ def investigate_unmatched_case(message_text, rows):
 def make_decision(budget_result, failure_match_keyword, failure_match_ai, agent_flag, architecture_suggestion):
     if budget_result["status"] == "over":
         return "BLOCK - project is over budget"
-    # Either check catching a match is enough to block
     final_match = failure_match_keyword or failure_match_ai
     if final_match:
         return f"BLOCK - matches known failure pattern: {final_match}"
@@ -317,8 +311,6 @@ def lambda_handler(event, context):
     failure_match_ai, ai_confidence = check_failure_pattern_ai(sns_message, failure_rows)
     logger.info("FAILURE CHECK (AI): %s (confidence: %d)",
                 failure_match_ai if failure_match_ai else "no match found", ai_confidence)
-    failure_match_ai = check_failure_pattern_ai(sns_message, failure_rows)
-    logger.info("FAILURE CHECK (AI): %s", failure_match_ai if failure_match_ai else "no match found")
 
     agent_flag = None
     if not failure_match_keyword and not failure_match_ai:
@@ -332,5 +324,13 @@ def lambda_handler(event, context):
 
     return {
         "statusCode": 200,
-        "body": json.dumps({"decision": final_decision})
+        "body": json.dumps({
+            "decision": final_decision,
+            "budget_status": budget_result["status"],
+            "keyword_match": failure_match_keyword,
+            "ai_match": failure_match_ai,
+            "ai_confidence": ai_confidence,
+            "agent_flag": agent_flag,
+            "architecture_suggestion": architecture_suggestion
+        })
     }
